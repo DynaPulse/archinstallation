@@ -177,7 +177,7 @@ fi
 
 info "Starting Arch dualboot installer (interactive). Log -> ${LOG}"
 info "Target disk: ${DISK}"
-debug "Config: ARCH_ALLOC=${ARCH_ALLOCATION_GiB} GiB, ROOT=${ROOT_GiB} GiB, ESP=${ESP_MiB} MiB"
+debug "Config: ARCH_ALLOC=${ARCH_ALLOCATION_GiB} GiB, ROOT=${ROOT_GiB} GiB"
 
 
 # Check tools existence (abort if missing, unless dry-run)
