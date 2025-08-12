@@ -30,7 +30,9 @@ PARTTABLE_BACKUP_FILE=""
 MOUNTED=()
 
 fatal() {
-  error "$*"
+  error "FATAL: $*"
+  debug "fatal() called. Last command exit code: $?"
+  debug "Stack trace: $(caller 0)"
   cleanup_and_maybe_restore
   exit 1
 }
@@ -38,15 +40,20 @@ fatal() {
 cleanup_unmount() {
   debug "cleanup_unmount: unmounting mounts (${MOUNTED[*]})"
   for m in "${MOUNTED[@]}"; do
+    debug "Attempting to unmount $m"
     if mountpoint -q "${m}"; then
       warn "Unmounting ${m}"
-      umount -R "${m}" || true
+      umount -R "${m}" || debug "Failed to unmount $m (ignored)"
+    else
+      debug "$m is not a mountpoint, skipping"
     fi
   done
   MOUNTED=()
+  debug "cleanup_unmount: done"
 }
 
 cleanup_and_maybe_restore() {
+  debug "cleanup_and_maybe_restore: called"
   cleanup_unmount
   if [ -n "${PARTTABLE_BACKUP_FILE}" ] && [ "${RESTORED_PARTTABLE}" -eq 0 ] && [ "${DRY_RUN}" -eq 0 ]; then
     warn "A partition table backup exists at ${PARTTABLE_BACKUP_FILE}."
@@ -57,10 +64,11 @@ cleanup_and_maybe_restore() {
       partprobe "${DISK}" || true
     fi
   fi
+  debug "cleanup_and_maybe_restore: done"
 }
 
-trap 'fatal "Aborting due to trapped error."' ERR
-trap 'cleanup_unmount' EXIT
+trap 'debug "ERR trap triggered. Last exit code: $?"; fatal "Aborting due to trapped error."' ERR
+trap 'debug "EXIT trap triggered. Calling cleanup_unmount."; cleanup_unmount' EXIT
 
 ### ---------- CONFIG - EDIT BEFORE RUNNING ---------- ###
 DISK="/dev/nvme0n1"          # target disk (change if different)
