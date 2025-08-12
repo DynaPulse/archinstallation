@@ -21,8 +21,14 @@
 #   ./arch-dualboot-secureboot.sh --dry-run  # show commands without destructive actions
 #
 
-set -euo pipefail
+
+# Enhanced error tracing
+set -eEuo pipefail
 IFS=$'\n\t'
+
+# Track last command for debugging
+trap 'LAST_COMMAND=$BASH_COMMAND' DEBUG
+trap 'LAST_EXIT_CODE=$?' RETURN
 
 # --- FATAL ERROR HANDLING & CLEANUP ---
 RESTORED_PARTTABLE=0
@@ -33,6 +39,11 @@ fatal() {
   error "FATAL: $*"
   debug "fatal() called. Last command exit code: $?"
   debug "Stack trace: $(caller 0)"
+    error "Last command: ${LAST_COMMAND:-unknown}"
+  error "Last exit code: ${LAST_EXIT_CODE:-unknown}"
+  # Print stack trace for debugging
+  local i=0
+  while caller $i; do ((i++)); done
   cleanup_and_maybe_restore
   exit 1
 }
@@ -67,8 +78,10 @@ cleanup_and_maybe_restore() {
   debug "cleanup_and_maybe_restore: done"
 }
 
-trap 'debug "ERR trap triggered. Last exit code: $?"; fatal "Aborting due to trapped error."' ERR
-trap 'debug "EXIT trap triggered. Calling cleanup_unmount."; cleanup_unmount' EXIT
+
+# Enhanced ERR trap with command/exit code
+trap 'error "[DEBUG] ERR trap triggered. Last exit code: ${LAST_EXIT_CODE:-unknown}"; error "[DEBUG] Last command: ${LAST_COMMAND:-unknown}"; fatal "Aborting due to trapped error."' ERR
+trap 'debug "[DEBUG] EXIT trap triggered. Calling cleanup_unmount"; cleanup_unmount' EXIT
 
 ### ---------- CONFIG - EDIT BEFORE RUNNING ---------- ###
 DISK="/dev/nvme0n1"          # target disk (change if different)
@@ -114,11 +127,15 @@ error(){ echo "$(timestamp) [ERROR] $*" >&2; }
 
 # Helpers for dry-run and running
 run_cmd(){
+  debug "[DEBUG] About to run: $*"
   if [ "${DRY_RUN}" -eq 1 ]; then
     echo "[DRY-RUN] $*"
   else
     debug "RUN: $*"
     eval "$@"
+    local rc=$?
+    debug "[DEBUG] Command exit code: $rc"
+    return $rc
   fi
 }
 
@@ -141,6 +158,7 @@ TOTAL_CHECKPOINTS=12
 CHECKPOINT_IDX=0
 checkpoint_start() {
   CHECKPOINT_IDX=$((CHECKPOINT_IDX+1))
+  debug "[DEBUG] Entering checkpoint: $1"
   echo
   echo "=============================================="
   echo "[CHECKPOINT ${CHECKPOINT_IDX}/${TOTAL_CHECKPOINTS}] $1"
@@ -153,6 +171,7 @@ checkpoint_ok() {
     echo "  ✔ ${l}"
   done
   echo "=============================================="
+  debug "[DEBUG] Exiting checkpoint"
   echo
 }
 
