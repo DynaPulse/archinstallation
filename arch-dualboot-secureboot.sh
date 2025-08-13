@@ -237,7 +237,7 @@ echo
 blkid || true
 
 # Warn if existing Linux partitions are detected
-LINUX_PARTS=$(lsblk -nr -o NAME,FSTYPE,MOUNTPOINT "${DISK}" | awk '$2 ~ /(ext4|btrfs|xfs)/ && $3 !~ /^\/mnt/ {print $1}' | xargs)
+LINUX_PARTS=$(lsblk -nr -o NAME,FSTYPE,MOUNTPOINT "${DISK}" | awk '$2 ~ /(ext4|btrfs|xfs)/ && $3 !~ /^\/mnt/ {print $1}' | xargs || true)
 if [ -n "${LINUX_PARTS}" ]; then
   warn "Existing Linux partitions detected on ${DISK}: ${LINUX_PARTS}"
   if ! confirm "Continue anyway? (This may overwrite existing Linux data)"; then
