@@ -280,9 +280,9 @@ checkpoint_ok \
   "User confirmed to proceed with partition scan"
 
 
-# Find largest free region
-checkpoint_start "Searching for free/unallocated space (need ${ARCH_ALLOCATION_GiB} GiB)"
-REQ_MiB=$(( ARCH_ALLOCATION_GiB * 1024 ))
+
+# Dynamically analyze all unallocated regions and select the largest for partitioning
+checkpoint_start "Analyzing all unallocated space for partitioning"
 FREE_REGIONS=$(parted -m --script "${DISK}" unit MiB print free 2>/dev/null || true)
 debug "parted output:\n${FREE_REGIONS}"
 LARGEST_SIZE=0; LARGEST_START=0; LARGEST_END=0
@@ -293,33 +293,38 @@ while IFS= read -r line; do
     start=${start//MiB/}
     end=${end//MiB/}
     size=$(( end - start ))
+    debug "Found free region: start=${start} end=${end} size=${size} MiB"
     if [ "${size}" -gt "${LARGEST_SIZE}" ]; then
       LARGEST_SIZE=${size}; LARGEST_START=${start}; LARGEST_END=${end}
     fi
   fi
 done <<< "${FREE_REGIONS}"
-if [ "${LARGEST_SIZE}" -lt "${REQ_MiB}" ]; then
-  warn "No free region >= ${ARCH_ALLOCATION_GiB} GiB found (largest ${LARGEST_SIZE} MiB). Shrink Windows and re-run."
-  if ! confirm "Proceed anyway? (you take responsibility)"; then
-    fatal "Insufficient free space."
-  fi
+if [ "${LARGEST_SIZE}" -lt 32768 ]; then
+  fatal "No sufficiently large unallocated region found (minimum 32 GiB required)."
 fi
+info "Largest unallocated region: start=${LARGEST_START} MiB, end=${LARGEST_END} MiB, size=${LARGEST_SIZE} MiB"
 checkpoint_ok \
   "Largest free region found: start=${LARGEST_START} MiB, end=${LARGEST_END} MiB, size=${LARGEST_SIZE} MiB"
 
 
 # Plan partitions inside free region (root & optional home only, no new ESP)
-ALLOC_START=${LARGEST_START:-0}
-ALLOC_END=$(( ALLOC_START + REQ_MiB ))
-ROOT_START=$(( ALLOC_START + 1 ))   # small slack
-ROOT_END=$(( ROOT_START + (ROOT_GiB * 1024) ))
-HOME_START=${ROOT_END}
-HOME_END=${ALLOC_END}
-
 echo "Planned allocation (MiB):"
 echo "  Allocation: ${ALLOC_START} - ${ALLOC_END} (${ARCH_ALLOCATION_GiB} GiB)"
 echo "  ROOT   : ${ROOT_START} - ${ROOT_END} (${ROOT_GiB} GiB)"
 echo "  HOME   : ${HOME_START} - ${HOME_END} (remaining)"
+
+# Use the largest region for root and home
+ALLOC_START=${LARGEST_START}
+ALLOC_END=${LARGEST_END}
+ROOT_START=$((ALLOC_START + 1))   # small slack
+ROOT_END=$((ROOT_START + (ROOT_GiB * 1024)))
+HOME_START=${ROOT_END}
+HOME_END=${ALLOC_END}
+
+info "Planned allocation (MiB):"
+info "  Allocation: ${ALLOC_START} - ${ALLOC_END} MiB"
+info "  ROOT   : ${ROOT_START} - ${ROOT_END} MiB (${ROOT_GiB} GiB)"
+info "  HOME   : ${HOME_START} - ${HOME_END} MiB (remaining)"
 if ! confirm "Create root & home partitions in this allocation window?"; then
   fatal "User cancelled partition creation."
 fi
@@ -366,10 +371,11 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   echo "[DRY-RUN] parted ${DISK} mkpart primary ext4 ${ROOT_START}MiB ${ROOT_END}MiB"
   echo "[DRY-RUN] parted ${DISK} mkpart primary ext4 ${HOME_START}MiB ${HOME_END}MiB"
 else
-  info "Creating root partition"
+  info "Creating root partition: ${ROOT_START}MiB - ${ROOT_END}MiB"
   parted --script "${DISK}" mkpart primary ext4 "${ROOT_START}MiB" "${ROOT_END}MiB" || fatal "parted failed for root"
   # create home if large enough
   if [ $((HOME_END-HOME_START)) -gt 32 ]; then
+    info "Creating home partition: ${HOME_START}MiB - ${HOME_END}MiB"
     parted --script "${DISK}" mkpart primary ext4 "${HOME_START}MiB" "${HOME_END}MiB" || fatal "parted failed for home"
   else
     info "Not enough space for separate /home partition; will use root for /home"
@@ -466,10 +472,10 @@ checkpoint_ok \
 
 # Confirm formatting (do NOT format shared ESP)
 checkpoint_start "Formatting partitions (ext4 for root/home, shared ESP is NOT formatted)"
-echo "About to format:"
-echo "  ${ROOT_PART} -> ext4"
-[ -n "${HOME_PART:-}" ] && echo "  ${HOME_PART} -> ext4"
-echo "  ${EFI_PART}  -> (shared Windows ESP, will NOT be formatted)"
+info "About to format:"
+info "  ${ROOT_PART} -> ext4"
+[ -n "${HOME_PART:-}" ] && info "  ${HOME_PART} -> ext4"
+info "  ${EFI_PART}  -> (shared Windows ESP, will NOT be formatted)"
 
 # --- FILESYSTEM OVERWRITE WARNING ---
 for p in "${ROOT_PART}" ${HOME_PART:-}; do
@@ -491,10 +497,10 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   run_cmd "mkfs.ext4 -F ${ROOT_PART}"
   [ -n "${HOME_PART:-}" ] && run_cmd "mkfs.ext4 -F ${HOME_PART}"
 else
-  info "Formatting root..."
+  info "Formatting root partition: ${ROOT_PART}"
   mkfs.ext4 -F "${ROOT_PART}" || fatal "mkfs.ext4 failed for ${ROOT_PART}"
   if [ -n "${HOME_PART:-}" ]; then
-    info "Formatting home..."
+    info "Formatting home partition: ${HOME_PART}"
     mkfs.ext4 -F "${HOME_PART}" || fatal "mkfs.ext4 failed for ${HOME_PART}"
   fi
 fi
