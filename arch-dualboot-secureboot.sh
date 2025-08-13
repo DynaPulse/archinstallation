@@ -80,7 +80,7 @@ cleanup_and_maybe_restore() {
 
 
 # Enhanced ERR trap with command/exit code
-trap 'error "[DEBUG] ERR trap triggered. Last exit code: ${LAST_EXIT_CODE:-unknown}"; error "[DEBUG] Last command: ${LAST_COMMAND:-unknown}"; fatal "Aborting due to trapped error."' ERR
+trap 'rc=$?; LAST_EXIT_CODE=$rc; error "[DEBUG] ERR trap triggered. Last exit code: ${rc}"; error "[DEBUG] Last command: ${LAST_COMMAND:-unknown}"; fatal "Aborting due to trapped error."' ERR
 trap 'debug "[DEBUG] EXIT trap triggered. Calling cleanup_unmount"; cleanup_unmount' EXIT
 
 ### ---------- CONFIG - EDIT BEFORE RUNNING ---------- ###
@@ -237,7 +237,7 @@ echo
 blkid || true
 
 # Warn if existing Linux partitions are detected
-LINUX_PARTS=$(lsblk -o NAME,FSTYPE,MOUNTPOINT "${DISK}" | grep -E 'ext4|btrfs|xfs' | grep -v "/mnt" | awk '{print $1}' | xargs)
+LINUX_PARTS=$(lsblk -nr -o NAME,FSTYPE,MOUNTPOINT "${DISK}" | awk '$2 ~ /(ext4|btrfs|xfs)/ && $3 !~ /^\/mnt/ {print $1}' | xargs)
 if [ -n "${LINUX_PARTS}" ]; then
   warn "Existing Linux partitions detected on ${DISK}: ${LINUX_PARTS}"
   if ! confirm "Continue anyway? (This may overwrite existing Linux data)"; then
@@ -266,9 +266,8 @@ echo "  ${WIN_UNKNOWN} (Windows unknown) - WILL BE PRESERVED"
 echo "  ${WIN_RECOVERY} (Windows Reco)   - WILL BE PRESERVED"
 echo
 echo "Requested new Linux partitions (preferred):"
-echo "  ${DISK}p${LINUX_ESP_PART_NO} -> Linux EFI  ${ESP_MiB} MiB"
-echo "  ${DISK}p${LINUX_ROOT_PART_NO} -> / (root)   ${ROOT_GiB} GiB"
-echo "  ${DISK}p${LINUX_HOME_PART_NO} -> /home      remaining of ${ARCH_ALLOCATION_GiB} GiB allocation"
+echo "  Root (/):   ${ROOT_GiB} GiB (ext4)"
+echo "  Home (/home): remaining of the chosen free region (ext4)"
 echo
 if ! confirm "Do you want to continue to scan for unallocated space and propose a partition plan?"; then
   info "User aborted at initial confirmation. Exiting."
